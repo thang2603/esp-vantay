@@ -3,10 +3,20 @@
 #include <HTTPClient.h>
 #include <Adafruit_Fingerprint.h>
 
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
 /* ================= WIFI ================= */
 #define WIFI_SSID "Bubu"  // name wifi
 #define WIFI_PASS "28052000"  // password wifi
 
+/* ================= OLED ================= */
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_ADDR 0x3C
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 #define DEVICE_ID  "ESP-01"
 #define POLL_INTERVAL 5000
@@ -34,16 +44,33 @@ String currentMode = "NONE";
 
 uint8_t enrollId = 0;
 
+// display text
+void displayText(String text) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.print("Che do: ");
+  if(currentMode == "NONE"){
+    display.println("Diem danh");
+  }
+  else{
+    display.println("Dang ky");
+  }
+  display.println(text);
+  display.display();
+}
+
 // connect wifi
 void connectWiFi() {
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   Serial.print("Connecting WiFi");
+  displayText("Ket noi WiFi ... ");
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
   }
-  Serial.println("\n✅ WiFi connected");
+  displayText("Ket noi thanh cong");
 }
 
 uint16_t findEmptyFingerprintID() {
@@ -61,13 +88,11 @@ bool pollCommand(){
   HTTPClient http;
   http.begin(API_COMMAND);
   int httpCode = http.GET();
-  Serial.println(httpCode);
   if (httpCode!= 200) {
     http.end();
     return false;
   }
    String res = http.getString();
-   Serial.println(res);
    if(res.indexOf("ENROLL") > 0 ){
     currentMode = "ENROLL";
     int tempId = findEmptyFingerprintID();
@@ -96,12 +121,19 @@ void sendEnrollResult(boolean success){
       body += "}";
       int httpCode = http.POST(body);
       Serial.println(httpCode);
-
+      if(httpCode != 201){
+        displayText("Gui that bai.");
+      }
+      else{
+        displayText("Gui thanh cong.");
+      }
+      Serial.println(httpCode);
+      http.end();
+      delay(1000);
 }
 
 void enrollFingerprint() {
-  Serial.println("Dat tay lan 1");
-
+  displayText("Dat tay lan 1");
   int p = -1;
   while (p != FINGERPRINT_OK) {
     p = finger.getImage();
@@ -109,10 +141,10 @@ void enrollFingerprint() {
   }
 
   finger.image2Tz(1);
-  Serial.println("Nhat tay ra");
+  displayText("Nhat tay ra");
   delay(2000);
 
-  Serial.println("Dat tay lan 2");
+ displayText("Dat tay lan 2");
   p = -1;
   while (p != FINGERPRINT_OK) {
     p = finger.getImage();
@@ -122,17 +154,17 @@ void enrollFingerprint() {
   finger.image2Tz(2);
 
   if (finger.createModel() != FINGERPRINT_OK) {
-    Serial.println("Tao mau that bai");
+    displayText("Tao mau that bai");
     sendEnrollResult(false);
     currentMode = "NONE";
     return;
   }
 
   if (finger.storeModel(enrollId) == FINGERPRINT_OK) {
-    Serial.println("Dang ky thanh cong");
+    displayText("Dang ky thanh cong");
     sendEnrollResult(true);
   } else {
-    Serial.println("Luu that bai");
+    displayText("Luu that bai");
     sendEnrollResult(false);
   }
 
@@ -152,11 +184,17 @@ void sendAttendance(uint8_t id) {
   body += "\"fingerprintId\":" + String(id);
   body += "}";
 
-  http.POST(body);
- String res = http.getString();
-  Serial.println(res);
 
-  http.end();
+ int httpCode = http.POST(body);
+Serial.println(httpCode);
+    if(httpCode != 201){
+      displayText("Gui that bai.");
+    }
+    else{
+      displayText("Gui thanh cong.");
+    }
+    http.end();
+    delay(1000);
 }
 
 void scanFingerprint() {
@@ -167,12 +205,9 @@ void scanFingerprint() {
 
   p = finger.fingerSearch();
   if (p != FINGERPRINT_OK) {
-    Serial.println("Khong trung khop");
+    displayText("Khong trung khop");
     return;
   }
-
-  Serial.print("Match ID: ");
-  Serial.println(finger.fingerID);
 
   sendAttendance(finger.fingerID);
 }
@@ -198,16 +233,24 @@ void setup() {
   finger.begin(57600);
 
   if (!finger.verifyPassword()) {
-    Serial.println("Khong tim thay AS608");
+    displayText("Khong tim thay AS608");
     while (1);
   }
   // clearAllFingerprints();
 
+   Wire.begin(21, 22);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+    Serial.println("Khong tim thay OLED");
+    while (true);
+  }
+   display.clearDisplay();
+
   connectWiFi();
-  Serial.println("Ready");
 }
 
 void loop() {
+
   if(currentMode == "NONE"){
     scanFingerprint();
     if(millis() - lastPoll > POLL_INTERVAL){
